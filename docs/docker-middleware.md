@@ -113,11 +113,15 @@ docker compose up -d --wait         # 再起其余服务
 全新数据卷上偶发的启动竞态，`restart: unless-stopped` 会自动重启一次并恢复正常。
 若反复出现，`docker compose restart rabbitmq`。
 
-## Testcontainers 复用开关（未生效，待 Task 6 补完）
+## Testcontainers 复用开关（已定论：不启用）
 
 仓库根目录的 `.testcontainers.properties` 写了 `testcontainers.reuse.enable=true`，
-目的是让 `-Pit` 重复跑时复用容器、省下重建时间。
+但 **`-Pit` 的容器复用是刻意关闭的**：
 
-**这个开关单独不生效。** Testcontainers 要求每个容器额外调用 `.withReuse(true)`，
-而 `IntegrationTestBase`（Task 6）目前还没有调用，所以现在这段配置只是**把开关准备好**，
-真正的复用要等 Task 6 实现时补上 `.withReuse(true)`。该文件已在 `.gitignore` 中。
+- Testcontainers 要求每个容器额外调用 `.withReuse(true)` 才会复用，
+  而 `IntegrationTestBase` 没有调用——这是决定，不是遗漏。
+- 原因：`spring.sql.init.mode=always` 意味着每次上下文启动都会重跑
+  `schema.sql` / `data.sql`。容器若跨运行保留状态，非幂等的种子数据会失败。
+  理由写在 `IntegrationTestBase` 的类注释里。
+- 因此 `.testcontainers.properties` 现在是一份**不起作用的保险**：它只声明了
+  「允许复用」，真正开启还需要代码改动。该文件已在 `.gitignore` 中。
