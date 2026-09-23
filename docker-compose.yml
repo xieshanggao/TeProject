@@ -1,0 +1,76 @@
+# 本地开发与压测用的中间件栈。
+# 与集成测试的关系：这套容器是给「运行应用 + k6 压测」用的；集成测试
+# （mvnw.cmd test -Pit）由 Testcontainers 自己起随机端口的容器，两套互不影响。
+# 镜像版本刻意与 Testcontainers 对齐（redis:7-alpine / mysql:8.0，见实施计划
+# Task 6），只有 RabbitMQ 额外带 management 插件，以便用 15672 控制台观察队列。
+# 端口一律绑 127.0.0.1：RabbitMQ 放开了 guest 的 loopback 限制
+# （见 docker/rabbitmq.conf），因此不能把这三件套暴露到局域网。
+
+name: teproject-middleware
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: seckill-redis
+    # 开 AOF 持久化：设计文档 §13 要求 Redis 落盘，否则重启会丢掉权威库存。
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: seckill-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: teproject
+    # 字符集与时区对齐 application.properties 的 serverTimezone=Asia/Shanghai
+    # 以及 schema.sql 里的 DATETIME 列，避免跨时区写入偏移 8 小时。
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      # 首次启动要初始化数据目录，Windows 上实测约 100 秒。start_period 必须
+      # 盖住这段窗口：初始化期间的失败一旦累积到 retries 就会判定为 unhealthy，
+      # 而 `up -d --wait` 看到 unhealthy 会把整个 compose 项目停掉（会打断初始化、
+      # 损坏数据目录，见 docs/docker-middleware.md 的排障段）。
+      start_period: 150s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: seckill-rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"    # AMQP
+      - "127.0.0.1:15672:15672"  # 管理控制台
+    volumes:
+      - ./docker/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  mysql-data:
+  rabbitmq-data:

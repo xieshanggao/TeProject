@@ -17,9 +17,8 @@
 - **默认测试命令不得依赖 Docker**；依赖 Docker 的测试必须标 `@Tag("integration")`，只在 `mvnw.cmd test -Pit` 下运行
 - 公开接口与并发控制代码必须写注释，说明**用途、并发不变量或设计原因**；不得写复述代码字面含义的注释（`AGENTS.md` 约定）
 - 包根为 `com.fjf.teproject`；按 `docs/architecture.md` 的分层组织：`controller` / `service` / `repository` / `domain`，新增 `messaging` 与 `reconcile` 两层
-- 持久化访问使用 **JdbcTemplate**，不使用 JPA（显式 SQL 让「两条语句在同一事务」这一并发语义直接可见）
-- 持久化使用 **Spring JDBC** 而非 JPA：本系统的核心是并发正确性，JPA 的脏检查与延迟加载会给并发语义引入无关噪音
-- **本仓库当前不是 git 仓库**，因此本计划不含 commit 步骤。这是一个刻意的适配，不是遗漏
+- 持久化使用 **Spring JDBC (JdbcTemplate)** 而非 JPA：本系统的核心是并发正确性，JPA 的脏检查与延迟加载会给并发语义引入无关噪音；显式 SQL 让「两条语句在同一事务」这一并发语义直接可见
+- **每个任务完成后立即 commit**（分支 `feature/distributed-seckill`，基线提交 `3255fcd`）。SDD 的 diff 与 review 机制依赖 git；不配置 remote、不推送
 - 四条并发不变量（spec §5.2）：I1 不超卖、I2 一人一单、I3 不少卖、I4 最终一致
 
 ## 任务阶段概览
@@ -51,18 +50,34 @@
 
 **背景：** `TeProjectApplicationTests` 目前是裸的 `@SpringBootTest`。一旦加入 MySQL 依赖，它会尝试连接数据库，导致默认测试失败。必须把它移入 integration 层。
 
-- [ ] **Step 1: 在 `pom.xml` 的 `<properties>` 之后加入 testcontainers 版本属性**
+- [ ] **Step 1: 在 `pom.xml` 的 `<properties>` 中加入 testcontainers 版本属性，并导入其 BOM**
+
+`spring-boot-dependencies:2.7.18` **不管理 Testcontainers**（Testcontainers 的依赖管理从 Spring Boot 3.1 才开始）。因此仅声明 `<testcontainers.version>` 属性是不够的——它没有任何东西会去读它。必须显式导入 `testcontainers-bom`，下面的 `org.testcontainers:*` 依赖才能省略版本号。
 
 ```xml
 <properties>
     <java.version>11</java.version>
     <testcontainers.version>1.19.8</testcontainers.version>
 </properties>
+
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-bom</artifactId>
+            <version>${testcontainers.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
 ```
 
 - [ ] **Step 2: 在 `pom.xml` 的 `<dependencies>` 中追加依赖**
 
 保留现有的 `spring-boot-starter`、`spring-boot-starter-test`、`spring-boot-starter-web`（注意：现有文件里 `spring-boot-starter-web` 重复声明了两次，**保持不变**，本次不清理它以免扩大变更范围）。
+
+MySQL 驱动使用 `com.mysql:mysql-connector-j`：Spring Boot 2.7.18 管理的正是这个坐标，而旧的 `mysql:mysql-connector-java:8.0.33` 已退化为仅含 relocation 的存根（能解析，但每次构建都告警）。驱动类名两者相同，均为 `com.mysql.cj.jdbc.Driver`。
 
 ```xml
 <dependency>
@@ -78,8 +93,8 @@
     <artifactId>spring-boot-starter-jdbc</artifactId>
 </dependency>
 <dependency>
-    <groupId>mysql</groupId>
-    <artifactId>mysql-connector-java</artifactId>
+    <groupId>com.mysql</groupId>
+    <artifactId>mysql-connector-j</artifactId>
     <scope>runtime</scope>
 </dependency>
 
