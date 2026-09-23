@@ -103,6 +103,17 @@
             <scope>test</scope>
         </dependency>
 
+        <!--
+          消息消费者的集成测试需要轮询等待异步落库。awaitility 并不由
+          spring-boot-starter-test 传递引入（实测依赖树里没有），因此显式声明；
+          版本由 spring-boot-dependencies 管理，不写死版本号。
+        -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
