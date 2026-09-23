@@ -10,6 +10,16 @@
 | HTTP | Spring Web |
 | 测试 | Spring Boot Test |
 
+## 本地中间件环境
+
+秒杀功能需要 Redis（权威库存）、MySQL（持久库存与订单）、RabbitMQ（异步落库）。
+本地用仓库根目录的 `docker-compose.yml` 起这三件套，容器端口与账号**刻意对齐**
+`application.properties` 的默认值，因此本地启动应用无需任何配置改动，也不需要修改
+`src/main/resources` 下的任何文件。
+
+- 起停、账号、排障，以及本机 MySQL 服务的停用与还原：见 `docs/docker-middleware.md`。
+- 集成测试（`mvnw.cmd test -Pit`）用的是 Testcontainers 自起的随机端口容器，与这套互不影响。
+
 ## 建议的应用边界
 
 随着应用发展，按以下边界组织代码。在功能确有需要前，不要提前创建分层。
